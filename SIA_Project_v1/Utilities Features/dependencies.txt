@@ -1,2 +1,0 @@
-pip install Faker
-pip install pyshorteners
