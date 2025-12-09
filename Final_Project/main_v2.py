@@ -19,8 +19,8 @@ try:
     from modules.database import initialize_db
 except Exception:
     try:
-        from auth import login_user, register_user # local files
-        from database import initialize_db
+        from modules.auth import login_user, register_user # local files
+        from modules.database import initialize_db
     except Exception:
         print("Backend modules not found. Running in UI-only mode.")
         def login_user(u, p):
@@ -319,16 +319,11 @@ class MediaApp(tk.Tk):
 
         # Map categories to actual audio file paths (update paths accordingly)
         self.audio_files = {
-            "Pop Hits": "./audio/nandito.mp3",
-            "Rock Classics": "./audio/rock.mp3",
-            "Hip-Hop & Rap": "./audio/hiphop.mp3",
-            "Electronic & Dance": "./audio/electronic.mp3",
-            "Instrumental": "./audio/instrumental.mp3",
-            "Relaxing / Sleep Sounds": "./audio/relax.mp3",
-            "Anime & Game OSTs": "./audio/ost.mp3",
-            "Classical Music": "./audio/classical.mp3",
-            "Romantic Songs": "./audio/romantic.mp3",
-            "Motivational Tracks": "./audio/motivational.mp3"
+            "Nandito Ako": "./audio/nandito.mp3",
+            "Buwan": "./audio/buwan.mp3",
+            "Dilaw": "./audio/dilaw.mp3",
+            "Upuan": "./audio/upuan.mp3",
+            "Multo": "./audio/multo.mp3",
         }
 
         pygame.mixer.init()  # initialize mixer
