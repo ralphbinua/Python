@@ -3,23 +3,18 @@ from tkinter import messagebox
 import random
 import os
 import pygame
+import vlc
 
-# External libs for video playback
-try:
-    import cv2
-    from PIL import Image, ImageTk
-    VIDEO_PLAYBACK_ENABLED = True
-except ImportError:
-    print("OpenCV or PIL not found — video playback disabled.")
-    VIDEO_PLAYBACK_ENABLED = False
+# ================= BASE DIR FIX =================
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # Dummy backend auth and DB (replace with actual imports if available)
 try:
-    from modules.auth import login_user, register_user # packaged layout
+    from modules.auth import login_user, register_user  # packaged layout
     from modules.database import initialize_db
 except Exception:
     try:
-        from modules.auth import login_user, register_user # local files
+        from modules.auth import login_user, register_user  # local files
         from modules.database import initialize_db
     except Exception:
         print("Backend modules not found. Running in UI-only mode.")
@@ -37,17 +32,25 @@ COLOR_GRAY_BOX = "#D5D8DC"
 COLOR_BUTTON_HOVER = "#D35D10"
 
 FONT_HEADER = ("Arial", 20, "bold")
-FONT_BODY   = ("Arial", 12)
+FONT_BODY = ("Arial", 12)
 FONT_BUTTON = ("Arial", 12, "bold")
-FONT_SMALL  = ("Arial", 10)
+FONT_SMALL = ("Arial", 10)
 
 # Video files - add your actual video paths here
 VIDEO_FILES = {
-    "Batman": "./video/bat-man.mp4",
-    "Spider-Man": "./video/spider-man.mp4",
-    "Superman": "./video/super-man.mp4",
-    "Iron Man": "./video/iron-man.mp4",
-    "Avatar": "./video/avatar.mp4"
+    "Batman": os.path.join(BASE_DIR, "video", "bat-man.mp4"),
+    "Spider-Man": os.path.join(BASE_DIR, "video", "spider-man.mp4"),
+    "Superman": os.path.join(BASE_DIR, "video", "super-man.mp4"),
+    "Iron Man": os.path.join(BASE_DIR, "video", "iron-man.mp4"),
+    "Avatar": os.path.join(BASE_DIR, "video", "avatar.mp4")
+}
+
+AUDIO_FILES = {
+    "Nandito Ako": os.path.join(BASE_DIR, "audio", "nandito.mp3"),
+    "Buwan": os.path.join(BASE_DIR, "audio", "buwan.mp3"),
+    "Dilaw": os.path.join(BASE_DIR, "audio", "dilaw.mp3"),
+    "Upuan": os.path.join(BASE_DIR, "audio", "upuan.mp3"),
+    "Multo": os.path.join(BASE_DIR, "audio", "multo.mp3")
 }
 
 class MediaApp(tk.Tk):
@@ -58,32 +61,23 @@ class MediaApp(tk.Tk):
         self.resizable(False, False)
 
         initialize_db()
+        pygame.mixer.init()  # Initialize once
+
+        # VLC instance for video playback
+        self.vlc_instance = vlc.Instance("--vout=d3d9", "--no-video-title-show")
+        self.vlc_player = None
+
         self.current_user = None
-
-        # Video playback attributes
-        self.video_capture = None
-        self.video_frame_label = None
-        self.playback_job = None
-        self.is_playing = False
-        self.current_video_key = None
-        self.frame_delay_ms = 33
-
         self.container = tk.Frame(self)
         self.container.pack(fill="both", expand=True)
 
         self.show_landing_page()
 
     def clear_screen(self):
-        if self.playback_job:
-            self.after_cancel(self.playback_job)
-            self.playback_job = None
-
-        if self.video_capture:
-            self.video_capture.release()
-            self.video_capture = None
-
-        self.is_playing = False
-
+        pygame.mixer.music.stop()
+        if self.vlc_player:
+            self.vlc_player.stop()
+            self.vlc_player = None
         for widget in self.container.winfo_children():
             widget.destroy()
 
@@ -114,13 +108,10 @@ class MediaApp(tk.Tk):
     def perform_login(self):
         user = self.entry_user.get()
         pwd = self.entry_pass.get()
-
         if not user or not pwd:
             messagebox.showwarning("Input", "Please enter username and password.")
             return
-
         success, msg = login_user(user, pwd)
-
         if success:
             self.current_user = user
             self.show_menu_page()
@@ -130,7 +121,6 @@ class MediaApp(tk.Tk):
     def perform_register(self):
         user = self.entry_user.get()
         pwd = self.entry_pass.get()
-
         if user and pwd:
             success, msg = register_user(user, pwd)
             messagebox.showinfo("Registration", msg)
@@ -205,16 +195,12 @@ class MediaApp(tk.Tk):
 
     # --- PART 4: Video Player ---
     def show_movie_player(self, title):
-        if not VIDEO_PLAYBACK_ENABLED:
-            messagebox.showerror("Error", "Video playback not available (missing OpenCV/PIL).")
-            return
         if title not in VIDEO_FILES or not os.path.exists(VIDEO_FILES[title]):
-            messagebox.showerror("Error", f"Video file for {title} not found.")
+            messagebox.showerror("Error", "Video file not found.")
             return
 
         self.clear_screen()
         self.container.configure(bg=COLOR_DARK_BG)
-        self.current_video_key = title
 
         top = tk.Frame(self.container, bg=COLOR_DARK_BG)
         top.pack(fill="x", padx=20, pady=10)
@@ -226,80 +212,41 @@ class MediaApp(tk.Tk):
         tk.Label(top, text=f"Now Playing: {title}", bg=COLOR_DARK_BG, fg="white",
                  font=FONT_HEADER).pack(side="left", padx=20)
 
-        player = tk.Frame(self.container, bg=COLOR_DARK_BG)
-        player.place(relx=0.5, rely=0.55, anchor="center")
+        video_frame = tk.Frame(self.container, bg="black", width=700, height=394)
+        video_frame.place(relx=0.5, rely=0.55, anchor="center")
 
-        self.video_frame_label = tk.Label(player, bg="black", width=700, height=394)
-        self.video_frame_label.pack()
+        self.update()  # Needed for VLC embedding
 
-        video_path = VIDEO_FILES[title]
-        self.video_capture = cv2.VideoCapture(video_path)
-        if not self.video_capture.isOpened():
-            messagebox.showerror("Error", "Failed to open video file.")
-            self.exit_video_player()
-            return
+        # Use existing VLC instance
+        self.vlc_player = self.vlc_instance.media_player_new()
+        media = self.vlc_instance.media_new(VIDEO_FILES[title])
+        self.vlc_player.set_media(media)
+        self.vlc_player.set_hwnd(video_frame.winfo_id())
+        self.vlc_player.play()
 
-        fps = self.video_capture.get(cv2.CAP_PROP_FPS)
-        if fps <= 0:
-            fps = 30
-        self.frame_delay_ms = int(1000 / fps)
-
+        # --- Controls ---
         controls = tk.Frame(self.container, bg=COLOR_DARK_BG)
         controls.pack(side="bottom", pady=10)
 
-        tk.Button(controls, text="⏯ Pause", bg=COLOR_ACCENT, fg="white",
-                  font=FONT_BUTTON, width=10, relief="raised", bd=2,
-                  command=self.toggle_play_pause).grid(row=0, column=0, padx=5)
+        tk.Button(controls, text="⏸ Pause", bg=COLOR_ACCENT, fg="white",
+                  font=FONT_BUTTON, width=10,
+                  command=self.vlc_player.pause).grid(row=0, column=0, padx=5)
 
-        tk.Button(controls, text="⏪ -5s", bg=COLOR_ACCENT, fg="white",
-                  font=FONT_BUTTON, width=6, relief="raised", bd=2,
-                  command=lambda: self.seek_video(-5)).grid(row=0, column=1, padx=5)
+        tk.Button(controls, text="▶ Play", bg=COLOR_ACCENT, fg="white",
+                  font=FONT_BUTTON, width=10,
+                  command=self.vlc_player.play).grid(row=0, column=1, padx=5)
 
-        tk.Button(controls, text="+5s ⏩", bg=COLOR_ACCENT, fg="white",
-                  font=FONT_BUTTON, width=6, relief="raised", bd=2,
-                  command=lambda: self.seek_video(5)).grid(row=0, column=2, padx=5)
-
-        self.is_playing = True
-        self.play_video_frame()
-
-    def play_video_frame(self):
-        if not self.video_capture:
-            return
-
-        if self.is_playing:
-            ret, frame = self.video_capture.read()
-            if not ret:
-                self.exit_video_player()
-                return
-
-            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            pil_img = Image.fromarray(frame)
-            pil_img = pil_img.resize((700, 394), Image.LANCZOS)
-            tk_image = ImageTk.PhotoImage(pil_img)
-
-            self.video_frame_label.configure(image=tk_image)
-            self.video_frame_label.image = tk_image
-
-        self.playback_job = self.after(self.frame_delay_ms, self.play_video_frame)
-
-    def toggle_play_pause(self):
-        self.is_playing = not self.is_playing
-
-    def seek_video(self, seconds):
-        if not self.video_capture:
-            return
-        current_pos = self.video_capture.get(cv2.CAP_PROP_POS_MSEC)
-        new_pos = max(0, current_pos + seconds * 1000)
-        self.video_capture.set(cv2.CAP_PROP_POS_MSEC, new_pos)
+        tk.Button(controls, text="⏹ Stop", bg=COLOR_ACCENT, fg="white",
+                  font=FONT_BUTTON, width=10,
+                  command=self.vlc_player.stop).grid(row=0, column=2, padx=5)
 
     def exit_video_player(self):
-        self.clear_screen()
+        if self.vlc_player:
+            self.vlc_player.stop()
+            self.vlc_player = None
         self.show_movies_page()
 
     # --- PART 5: Audio Page ---
-# --- PART 5: Audio Page (Functional) ---
- # add this at the top of your file
-
     def show_audio_page(self):
         self.clear_screen()
         self.container.configure(bg=COLOR_DARK_BG)
@@ -308,33 +255,23 @@ class MediaApp(tk.Tk):
         top.pack(fill="x", padx=20, pady=10)
 
         tk.Button(top, text="Go Back", bg=COLOR_ACCENT, fg="white",
-                font=FONT_BUTTON, relief="raised", bd=2,
-                command=self.show_menu_page).pack(side="left")
+                  font=FONT_BUTTON, relief="raised", bd=2,
+                  command=self.show_menu_page).pack(side="left")
 
         tk.Label(top, text="Music & Audio", bg=COLOR_DARK_BG, fg="white",
-                font=FONT_HEADER).pack(side="left", padx=20)
+                 font=FONT_HEADER).pack(side="left", padx=20)
 
         main = tk.Frame(self.container, bg=COLOR_DARK_BG)
         main.place(relx=0.5, rely=0.5, anchor="center")
 
-        # Map categories to actual audio file paths (update paths accordingly)
-        self.audio_files = {
-            "Nandito Ako": "./audio/nandito.mp3",
-            "Buwan": "./audio/buwan.mp3",
-            "Dilaw": "./audio/dilaw.mp3",
-            "Upuan": "./audio/upuan.mp3",
-            "Multo": "./audio/multo.mp3",
-        }
-
-        pygame.mixer.init()  # initialize mixer
+        self.audio_files = AUDIO_FILES
         self.currently_playing = None
-
         self.audio_buttons = []
+
         for name in self.audio_files.keys():
             available = os.path.exists(self.audio_files[name])
             btn_bg = COLOR_ACCENT if available else COLOR_GRAY_BOX
             btn_fg = "white" if available else "black"
-
             btn_command = (lambda n=name: self.play_audio_feedback(n)) if available else None
 
             btn = tk.Button(main, text=name, width=40, height=2,
@@ -345,7 +282,7 @@ class MediaApp(tk.Tk):
             self.audio_buttons.append(btn)
 
         self.audio_display = tk.Label(self.container, text="Select a music category to play.",
-                                    bg=COLOR_DARK_BG, fg="white", font=("Arial", 14))
+                                      bg=COLOR_DARK_BG, fg="white", font=("Arial", 14))
         self.audio_display.place(relx=0.5, rely=0.85, anchor="center")
 
     def play_audio_feedback(self, selected):
